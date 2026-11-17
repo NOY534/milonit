@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>מילונית</title>
+<meta name="description" content="מילון עברית, אנגלית ורוסית עם הגייה ומשפטים לדוגמה">
+<meta name="theme-color" content="#1D4ED8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="מילונית">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<style>
+:root {
+  --bg: #F2F4F8; --card: #FFFFFF; --sunk: #EEF1F6; --ink: #141A2A; --muted: #5E677A; --line: #DCE1EA;
+  --he: #1D4ED8; --en: #0F7B6C; --ru: #B42318; --he-soft: #E4EBFD; --en-soft: #DDF2EE; --ru-soft: #FBE8E6;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Hebrew", "Arial Hebrew", Arial, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0F1420; --card: #181F2F; --sunk: #212A3B; --ink: #E8ECF4; --muted: #9AA3B6; --line: #2C3548;
+    --he: #8AA9FF; --en: #5FD3BF; --ru: #FF9187; --he-soft: #1F2B4B; --en-soft: #163632; --ru-soft: #3B2326;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); }
+body { color: var(--ink); font-family: var(--font); font-size: 16px; line-height: 1.5; -webkit-text-size-adjust: 100%; }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--he); outline-offset: 2px; }
+[hidden] { display: none !important; }
+
+.app { max-width: 620px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-top: calc(20px + env(safe-area-inset-top)); padding-bottom: calc(40px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 16px; }
+
+header { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+h1 { margin: 0; font-size: 28px; font-weight: 700; }
+.langs { display: flex; gap: 6px; flex-wrap: wrap; font-size: 13px; font-weight: 600; }
+.langs span { padding: 2px 10px; border-radius: 999px; }
+.l-he { background: var(--he-soft); color: var(--he); }
+.l-en { background: var(--en-soft); color: var(--en); }
+.l-ru { background: var(--ru-soft); color: var(--ru); }
+
+form { display: flex; gap: 8px; }
+.field { flex: 1; min-width: 0; }
+#q { width: 100%; font-size: 20px; padding: 14px 16px; border: 2px solid var(--line); border-radius: 14px; background: var(--card); -webkit-appearance: none; appearance: none; }
+#q:focus { outline: none; border-color: var(--he); }
+#q::placeholder { color: var(--muted); font-size: 16px; }
+.go { border: 0; border-radius: 14px; padding: 0 22px; background: var(--ink); color: var(--card); font-weight: 600; font-size: 17px; cursor: pointer; }
+.go:disabled { opacity: .5; }
+.status { font-size: 14px; color: var(--muted); min-height: 21px; margin-top: -6px; display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.net { display: inline-flex; align-items: center; gap: 6px; }
+.net i { width: 8px; height: 8px; border-radius: 50%; background: var(--en); display: inline-block; }
+.net.off i { background: var(--ru); }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; }
+.card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 11px 18px; background: var(--sunk); font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+.card-head strong { color: var(--ink); font-size: 15px; }
+.badge { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); background: var(--card); }
+
+.row { display: grid; grid-template-columns: 74px minmax(0,1fr) auto; gap: 14px; align-items: center; padding: 15px 18px; border-top: 1px solid var(--line); }
+.row:first-of-type { border-top: 0; }
+.row .tag { font-size: 13px; font-weight: 600; text-align: center; padding: 4px 0; border-radius: 8px; }
+.row .word { font-size: 26px; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.row .alt { font-size: 14px; color: var(--muted); overflow-wrap: anywhere; }
+.row .pron { font-size: 15px; color: var(--muted); overflow-wrap: anywhere; }
+.row .pron b { font-weight: 600; color: var(--ink); }
+.row.src { background: var(--sunk); }
+.row.he .word { color: var(--he); } .row.en .word { color: var(--en); } .row.ru .word { color: var(--ru); }
+.ltr { direction: ltr; text-align: left; }
+
+.say { width: 46px; height: 46px; border-radius: 50%; border: 0; display: grid; place-items: center; cursor: pointer; flex: none; }
+.say.he { background: var(--he-soft); color: var(--he); }
+.say.en { background: var(--en-soft); color: var(--en); }
+.say.ru { background: var(--ru-soft); color: var(--ru); }
+.say.playing { box-shadow: 0 0 0 3px currentColor; }
+
+.ex { padding: 15px 18px 18px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.ex h2 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+.exline { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 12px; align-items: center; }
+.exline p { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+.exline .sub { display: block; font-size: 13px; color: var(--muted); }
+.exline .say { width: 38px; height: 38px; }
+
+.msg { text-align: center; color: var(--muted); padding: 26px 18px; }
+.spinner { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--he); border-radius: 50%; margin: 0 auto 10px; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.chips { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 14px; color: var(--muted); }
+.chips button { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: 5px 12px; cursor: pointer; font-size: 14px; color: var(--ink); }
+
+.install { display: flex; gap: 12px; align-items: center; justify-content: space-between; background: var(--he-soft); color: var(--ink); border-radius: 14px; padding: 12px 14px; font-size: 14px; flex-wrap: wrap; }
+.install button { border: 0; border-radius: 10px; padding: 8px 14px; background: var(--he); color: #fff; font-weight: 600; cursor: pointer; }
+.install .x { background: none; color: var(--muted); padding: 4px 8px; }
+footer { text-align: center; font-size: 12px; color: var(--muted); }
+
+@media (max-width: 480px) {
+  .row { grid-template-columns: minmax(0,1fr) auto; gap: 6px 12px; }
+  .row .tag { grid-column: 1 / -1; justify-self: start; padding: 2px 10px; }
+  .row .word { font-size: 23px; }
+  .go { padding: 0 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>מילונית</h1>
+    <div class="langs"><span class="l-he">עברית</span><span class="l-en">English</span><span class="l-ru">Русский</span></div>
+  </header>
+
+  <div class="install" id="install" hidden>
+    <span id="installText">אפשר להתקין את מילונית בטלפון ולפתוח אותה כמו אפליקציה.</span>
+    <span>
+      <button id="installBtn" type="button">התקנה</button>
+      <button class="x" id="installClose" type="button" aria-label="סגירה">✕</button>
+    </span>
+  </div>
+
+  <form id="form" autocomplete="off">
+    <div class="field">
+      <input id="q" type="search" enterkeyhint="search" spellcheck="false" autocapitalize="off" autocorrect="off" placeholder="הקלידו מילה · Type a word · Введите слово" aria-label="מילה לתרגום">
+    </div>
+    <button class="go" id="go" type="submit">תרגם</button>
+  </form>
+  <div class="status"><span id="detect"></span><span class="net" id="net"><i></i><span></span></span></div>
+
+  <div id="out"></div>
+  <div class="chips" id="suggest" hidden></div>
+  <div class="chips" id="recent" hidden></div>
+
+  <footer>המילון המובנה עובד גם בלי אינטרנט · מילים אחרות מתורגמות דרך האינטרנט</footer>
+</div>
+<script src="dict.js"></script>
+<script src="dict-extra.js"></script>
+<script src="dict-auto.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
