@@ -46,6 +46,15 @@ const FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
 const heKey = s => normHe(s).replace(/[ךםןףץ]/g, c => FINALS[c]);
 // spelling without the vowel letters ו / י (except the first letter): אישה = אשה, כיסא = כסא
 const heSkel = s => { const k = heKey(s); return k.charAt(0) + k.slice(1).replace(/[וי]/g, ""); };
+// true when one spelling is the other with only extra ו / י letters added (אשה ↔ אישה), nothing moved
+function onlyVavYodDiff(a, b) {
+  if (a === b) return true;
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  if (l.length - s.length > 2) return false;
+  let i = 0;
+  for (const ch of l) { if (i < s.length && ch === s[i]) i++; else if (ch !== "ו" && ch !== "י") return false; }
+  return i === s.length;
+}
 // irregular plurals (keys are written with final letters unified)
 const HE_IRREG = Object.fromEntries(Object.entries({
   "בתים": "בית", "ערים": "עיר", "אנשים": "איש", "נשים": "אישה", "ימים": "יום", "לילות": "לילה", "שנים": "שנה",
@@ -117,7 +126,11 @@ function findOffline(q, src) {
     const forms = heForms(q);
     for (const f of forms) { const hit = IDX.he.get(f.s); if (hit) { exact = hit; how = f.how; break; } }
     // other spelling: only for the whole word (with or without prefixes), never for a cut-off ending
-    if (!exact.length) for (const f of forms) { if (f.how === "form") continue; const hit = IDX.skel.get(heSkel(f.s)); if (hit) { exact = hit; how = "spelling"; break; } }
+    if (!exact.length) for (const f of forms) {
+      if (f.how === "form") continue;
+      const hit = (IDX.skel.get(heSkel(f.s)) || []).filter(e => onlyVavYodDiff(f.s, heKey(e.he)));
+      if (hit.length) { exact = hit; how = "spelling"; break; }
+    }
     if (!exact.length) for (const f of forms) { const hit = IDX.heAlt.get(f.s); if (hit) { exact = hit; how = "alt"; break; } }
     if (!exact.length) {
       const n = heKey(q);
@@ -126,6 +139,8 @@ function findOffline(q, src) {
   } else if (src === "ru") {
     const n = normX(q);
     exact = IDX.ru.get(n) || [];
+    // ending cut off, compared with whole dictionary words first (салаты → салат), then stem to stem
+    if (!exact.length && !n.includes(" ")) for (let k = 1; k <= 3 && n.length - k >= 3; k++) { const hit = IDX.ru.get(n.slice(0, -k)); if (hit) { exact = hit; how = "form"; break; } }
     if (!exact.length && !n.includes(" ")) { exact = IDX.ruStem.get(ruStem(n)) || []; how = exact.length ? "form" : ""; }
     if (!exact.length) { exact = (IDX.ruStem.get("~" + (n.includes(" ") ? n : ruStem(n))) || []).slice(0, 1); how = exact.length ? "alt" : ""; }
     if (!exact.length && n.length > 1) for (const e of DICT) { if (senses(e.ru).some(t => t.startsWith(n))) partial.push(e); if (partial.length >= 8) break; }
