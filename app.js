@@ -1,4 +1,6 @@
 "use strict";
+// Example sentences are turned off (the app is used during exams). Set to true to bring them back.
+const SHOW_EXAMPLES = false;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const store = {
@@ -238,7 +240,7 @@ async function onlineLookup(q, src, signal, onPartial) {
   // Hebrew vowel points & pronunciation, English pronunciation, Russian stress, example
   const enWord = src === "en" ? q : res.en.word;
   const extra = [];
-  extra.push(g("en", "iw", enWord, ["t", "rm", "ex"], signal).then(d => {
+  extra.push(g("en", "iw", enWord, SHOW_EXAMPLES ? ["t", "rm", "ex"] : ["t", "rm"], signal).then(d => {
     const nik = mainText(d);
     const target = src === "he" ? q : res.he.word;
     if (normHe(nik) === normHe(target)) res.he.word = nik;
@@ -251,7 +253,7 @@ async function onlineLookup(q, src, signal, onPartial) {
   const tr = heTranslit(res.he.word);
   res.he.lat = tr ? tr.lat : ""; res.he.cyr = tr ? tr.cyr : "";
 
-  const ex = pickExample(exList || [], enWord);
+  const ex = SHOW_EXAMPLES ? pickExample(exList || [], enWord) : "";
   if (ex) {
     try {
       const [dh, dr] = await Promise.all([g("en", "iw", ex, ["t", "rm"], signal), g("en", "ru", ex, ["t"], signal)]);
@@ -330,8 +332,8 @@ function render(r, opts = {}) {
   $("#out").innerHTML = `<div class="card">
     <div class="card-head"><strong>${opts.example ? "דוגמה" : "תרגום"}${r.pos && !opts.example ? ` <span style="font-weight:400;color:var(--muted)">· ${esc(r.pos)}</span>` : ""}</strong><span class="badge">${esc(badge)}</span></div>
     ${order.map(row).join("")}
-    ${ex.he || ex.en || ex.ru ? `<div class="ex"><h2>משפט לדוגמה</h2>${order.map(exLine).join("")}</div>` : ""}
-    ${opts.loading ? `<div class="ex"><h2>${r.origin === "offline" ? "מעדכן מהאינטרנט…" : "טוען ניקוד ומשפט לדוגמה…"}</h2></div>` : ""}
+    ${SHOW_EXAMPLES && (ex.he || ex.en || ex.ru) ? `<div class="ex"><h2>משפט לדוגמה</h2>${order.map(exLine).join("")}</div>` : ""}
+    ${opts.loading ? `<div class="ex"><h2>טוען ניקוד…</h2></div>` : ""}
   </div>`;
 }
 $("#out").addEventListener("click", e => {
