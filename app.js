@@ -67,7 +67,8 @@ const HE_IRREG = Object.fromEntries(Object.entries({
 function heForms(q) {
   const base = heKey(q);
   const out = [];
-  const add = (s, how) => { if (s.length >= 2 && !out.some(o => o.s === s)) out.push({ s, how }); };
+  let pl = 0; // how many prefix letters were stripped for the current stem
+  const add = (s, how) => { if (s.length >= 2 && !out.some(o => o.s === s)) out.push({ s, how, pl }); };
   // prefixes ו ה ב כ ל מ ש, up to three of them (וכשה...)
   const stems = [{ s: base, p: "" }];
   for (let i = 0; i < 3; i++) {
@@ -77,6 +78,7 @@ function heForms(q) {
   }
   for (const { s, p } of stems) {
     const tag = p ? "prefix" : "";
+    pl = p.length;
     if (HE_IRREG[s]) add(heKey(HE_IRREG[s]), "form");
     add(s, tag);
     if (s.endsWith("יימ") && s.length > 4) add(s.slice(0, -3), "form"); // dual: עיניים → עין
@@ -89,6 +91,117 @@ function heForms(q) {
   }
   return out;
 }
+// ---------- Hebrew verbs: conjugated form → infinitive (הלכתי → ללכת, מדברים → לדבר) ----------
+// Strips tense prefixes/suffixes, guesses the root, rebuilds the infinitive in the common verb patterns
+// and keeps only infinitives that exist in the dictionary. Keys use non-final letters (see heKey).
+const V_PRE = ["", "א", "ת", "י", "נ", "מ", "ה", "הת", "מת", "את", "ית", "נת", "תת", "הי", "הו", "מו", "יו", "תו", "או", "נו"];
+const V_SUF = ["", "תי", "ת", "נו", "תמ", "תנ", "ו", "ה", "ימ", "ות", "י", "נה", "תה"];
+// roots / short stems whose infinitive is irregular
+const V_IRREG = { "הלכ": "ללכת", "לכ": "ללכת", "לקח": "לקחת", "קח": "לקחת", "נתנ": "לתת", "תנ": "לתת", "תת": "לתת", "אמר": "להגיד" };
+// Remove vowel letters to get the root. Rules: a double יי/וו is a real consonant and stays;
+// ו inside the stem goes; י goes only right after the first letter (דיבר) or when a tense prefix
+// was stripped (מזמין, יכתיב). keepFirst=false also drops a leading י/ו (יושב → שב).
+function dropMatres(core, p, keepFirst) {
+  let out = "";
+  for (let i = 0; i < core.length; i++) {
+    const ch = core[i];
+    const dbl = core[i - 1] === ch || core[i + 1] === ch;
+    if ((ch === "ו" || ch === "י") && !dbl) {
+      if (i === 0) { if (!keepFirst) continue; out += ch; continue; }
+      if (ch === "ו") continue;
+      if (i === 1 || p !== "") continue;
+      if (i === core.length - 1) continue; // final י of a stem (קני → קנ)
+      return null; // י in the middle without a prefix: not a verb pattern (גרים)
+    }
+    out += ch;
+  }
+  return out;
+}
+function heVerbInfinitives(word) {
+  const w = heKey(word);
+  const out = new Map(); // infinitive key → cost
+  const add = (inf, cost) => { const k = heKey(inf); if (!out.has(k) || out.get(k) > cost) out.set(k, cost); };
+  for (const p of V_PRE) {
+    if (!w.startsWith(p)) continue;
+    for (const s of V_SUF) {
+      if (!w.endsWith(s) || w.length - p.length - s.length < 2) continue;
+      const core = w.slice(p.length, w.length - s.length);
+      // plural present (כותבים) needs ו after the first root letter or a short root (גרים); an article + plural is a noun
+      if ((s === "ימ" || s === "ות") && !p.startsWith("מ") && !(core[1] === "ו" || core.replace(/[וי]/g, "").length === 2)) continue;
+      if (p === "ה" && (s === "ימ" || s === "ות")) continue;
+      if ((s === "ימ" || s === "ות") && core.endsWith("י")) continue; // -יים / -יות are noun endings (מכוניות)
+      if (p === "" && s === "" && core.length > 4) continue;           // a bare 5-letter word is not a basic verb form
+      if (core.endsWith("י") && s === "") continue;                     // a final י needs a tense ending after it (קניתי)
+      if (core.endsWith("ו") && s !== "") continue;                     // ...ות / ...ית endings after ו belong to nouns (מכוניות)
+      // a word starting with ה is a verb only as הפעיל (הזמין, with י) or התפעל (הת-); otherwise ה is the article (המורה)
+      if (p === "" && core.startsWith("ה") && !core.startsWith("הת") && !core.slice(1).includes("י")) continue;
+      // הפעיל past with no ending (הזמין) or -ה / -ו (הזמינה) always keeps its י; without it ה- is the article (הרופא)
+      if (p === "ה" && (s === "" || s === "ה" || s === "ו") && !core.includes("י")) continue;
+      const base = p.length + s.length
+        - (p.startsWith("מ") || p === "ה" ? 0.5 : 0)   // מ- (present) and ה- (הפעיל past) are strong verb signs
+        + (s === "י" && (p === "" || p === "ה") ? 0.8 : 0); // a lone -י ending is rare for verbs
+      // which vowel letters inside the stem were there: י shows הפעיל (מזמין) or פיעל (דיבר), ו shows פעל (כותב)
+      const hasYod = core.slice(1).includes("י"), hasVav = core.slice(1).includes("ו");
+      const hifil = p.startsWith("ה") || p.startsWith("לה") ? 0 : hasYod ? 0.1 : 0.3; // הפעיל without ה- or י is less likely
+      // two guesses for the root: drop ו/י inside the word only, or the first letter too
+      const roots = new Set([dropMatres(core, p, true), dropMatres(core, p, false)].filter(Boolean));
+      for (const r of roots) {
+        const cost = base + (core.length - r.length) * 0.1;
+        if (V_IRREG[r]) add(V_IRREG[r], cost);
+        if (r.length === 3) {
+          const [a, b, c] = r;
+          add("ל" + a + b + "ו" + c, cost + (c === "ת" ? 0.8 : 0)); // פעל: לכתוב (…ות is usually a ל"ה verb instead)
+          add("ל" + a + b + c, cost + 0.05);         // פיעל: לדבר
+          add("לה" + a + b + "י" + c, cost + hifil); // הפעיל: להזמין
+          add("להת" + a + b + c, cost);              // התפעל: להתלבש
+          if (c === "ה") {
+            const fem = s === "" && hasYod ? 1.5 : 0; // בינה: ה is more likely a feminine ending than a root letter
+            add("ל" + a + b + "ות", cost + fem); add("לה" + a + b + "ות", cost + hifil + fem); add("להת" + a + b + "ות", cost + fem);
+          }
+          if (a === "י") { add("ל" + b + c + "ת", cost); add("להו" + b + "י" + c, cost); }  // לשבת, להוריד
+          if (a === "נ") { add("לי" + b + "ו" + c, cost); add("ל" + b + c + "ת", cost); }   // ליפול
+          if (a === "א") add("ל" + "ו" + b + c, cost + 0.2);                               // לומר
+        } else if (r.length === 2) {
+          const [a, b] = r;
+          const lamedHe = (hasYod && !hasVav ? 0.3 : 0) + (p.startsWith("ה") ? 0.2 : 0); // בינ / הבנתי → להבין rather than לבנות
+          add("ל" + a + "ו" + b, cost);   // לגור, לבוא
+          add("ל" + a + "י" + b, cost);   // לשים
+          add("לה" + a + "י" + b, cost + (hasVav ? 0.3 : 0));  // להבין
+          add("ל" + a + b + "ות", cost + lamedHe);  // לקנות, לראות
+          add("לה" + a + b + "ות", cost + lamedHe + 0.1);
+          add("ל" + a + b + "ת", cost);   // לשבת, לרדת, לדעת (אשב, ארד, אדע)
+        } else if (r.length === 4) {
+          add("ל" + r, cost + 0.1);       // לטלפן
+          add("להת" + r, cost + 0.1);
+        }
+      }
+    }
+  }
+  return out;
+}
+const isVerbEntry = e => e.pos === "פועל" || /^to /.test(e.en) || (/^ל/.test(e.he) && /^[а-яё]+(ть|ться|ти)(?=$|[\s;,(])/.test(e.ru));
+// before a verb only conjunctions are stripped: ו, ש, כש (and combinations), never ב/ל/מ/כ alone
+const V_CONJ = ["", "ו", "ש", "כש", "וכש", "וש"];
+function findHeVerb(q) {
+  const w = heKey(q);
+  let best = null;
+  for (const c of V_CONJ) {
+    if (!w.startsWith(c) || w.length - c.length < 2) continue;
+    const extra = c.length * 0.5 + (c.includes("ש") ? 1 : 0); // ש- before a verb is rarer than a word that starts with ש
+    for (const [inf, cost] of heVerbInfinitives(w.slice(c.length))) {
+      const hit = (IDX.he.get(inf) || []).filter(isVerbEntry);
+      if (hit.length && (!best || cost + extra < best.cost)) best = { hit, cost: cost + extra };
+    }
+  }
+  return best; // { hit, cost } or null
+}
+
+// Russian verb endings (present, past, imperative), longest first
+const RU_VERB_END = ["ешься","ется","ются","ится","ятся","ался","алась","ались","ешь","ете","ишь","ите","ает","яет","ует","ают","яют","уют","ала","ало","али","ила","или","ела","ели","ем","ет","им","ит","ут","ют","ат","ят","ал","ил","ел","ла","ли","ло","ю","у","й","л","и"];
+// English irregular past forms → base verb
+const EN_IRREG = Object.fromEntries("went:go ate:eat saw:see seen:see did:do done:do had:have was:be were:be been:be took:take taken:take gave:give given:give came:come made:make said:say got:get knew:know known:know thought:think found:find told:tell wrote:write written:write bought:buy brought:bring left:leave felt:feel kept:keep slept:sleep ran:run sat:sit stood:stand spoke:speak spoken:speak drank:drink drove:drive began:begin begun:begin heard:hear met:meet paid:pay sold:sell taught:teach caught:catch fought:fight understood:understand forgot:forget forgotten:forget lost:lose built:build sent:send spent:spend chose:choose chosen:choose flew:fly grew:grow threw:throw wore:wear won:win broke:break broken:break fell:fall hid:hide rode:ride sang:sing swam:swim children:child men:man women:woman feet:foot teeth:tooth mice:mouse people:person"
+  .split(" ").map(p => p.split(":")));
+
 // Russian / English: compare word stems (книги, книгу, книгой → книг)
 const RU_END = ["ыми","ими","ами","ями","ого","его","ому","ему","ешь","ете","ишь","ите","ться","тся","ая","яя","ое","ее","ые","ие","ых","их","ым","им","ой","ей","ую","юю","ом","ем","ах","ях","ам","ям","ов","ев","ет","ит","ут","ют","ат","ят","ть","ла","ло","ли","а","я","ы","и","у","ю","е","о","ь","й","л"];
 function ruStem(w) {
@@ -124,12 +237,27 @@ function findOffline(q, src) {
   let exact = [], how = "", partial = [];
   if (src === "he") {
     const forms = heForms(q);
-    for (const f of forms) { const hit = IDX.he.get(f.s); if (hit) { exact = hit; how = f.how; break; } }
-    // other spelling: only for the whole word (with or without prefixes), never for a cut-off ending
-    if (!exact.length) for (const f of forms) {
-      if (f.how === "form") continue;
-      const hit = (IDX.skel.get(heSkel(f.s)) || []).filter(e => onlyVavYodDiff(f.s, heKey(e.he)));
-      if (hit.length) { exact = hit; how = "spelling"; break; }
+    // whole word as typed: that's the answer
+    const direct = IDX.he.get(heKey(q));
+    if (direct) { exact = direct; }
+    else {
+      // otherwise weigh every reading and keep the most likely one; the others become suggestions
+      const cands = [];
+      for (const f of forms) {
+        const hit = IDX.he.get(f.s);
+        if (hit) cands.push({ hit, how: f.how || "form", score: f.pl * 0.8 + (f.how === "form" ? 1.2 : 0) });
+        if (f.how !== "form") {
+          const sp = (IDX.skel.get(heSkel(f.s)) || []).filter(e => onlyVavYodDiff(f.s, heKey(e.he)));
+          if (sp.length) cands.push({ hit: sp, how: "spelling", score: 2.5 + f.pl * 0.6 });
+        }
+      }
+      const v = findHeVerb(q);
+      if (v) cands.push({ hit: v.hit, how: "verb", score: 0.25 + 0.2 * v.cost });
+      cands.sort((a, b) => a.score - b.score);
+      if (cands.length) {
+        exact = cands[0].hit.slice(); how = cands[0].how;
+        for (const c of cands.slice(1)) for (const e of c.hit) if (!exact.includes(e) && !partial.includes(e)) partial.push(e);
+      }
     }
     if (!exact.length) for (const f of forms) { const hit = IDX.heAlt.get(f.s); if (hit) { exact = hit; how = "alt"; break; } }
     if (!exact.length) {
@@ -139,7 +267,22 @@ function findOffline(q, src) {
   } else if (src === "ru") {
     const n = normX(q);
     exact = IDX.ru.get(n) || [];
-    // ending cut off, compared with whole dictionary words first (салаты → салат), then stem to stem
+    // verbs: говорю → говорить, читаешь → читать, работал → работать, люблю → любить, пишу → писать
+    if (!exact.length && !n.includes(" ")) {
+      outer: for (const end of RU_VERB_END) {
+        if (!n.endsWith(end) || n.length - end.length < 2) continue;
+        const stem0 = n.slice(0, n.length - end.length);
+        const stems = [stem0];
+        if (/[бпвмф]л$/.test(stem0)) stems.push(stem0.slice(0, -1));                 // любл → люб
+        const alt = { "ж": ["з", "д", "г"], "ч": ["т", "к"], "щ": ["ст", "ск"], "ш": ["с", "х"] }[stem0.slice(-1)];
+        if (alt) for (const a of alt) stems.push(stem0.slice(0, -1) + a);           // пиш → пис, хоч → хот
+        for (const stem of stems) for (const inf of ["ть", "ать", "ять", "ить", "еть", "овать", "ться", "аться", "иться"]) {
+          const hit = (IDX.ru.get(stem + inf) || []).filter(isVerbEntry);
+          if (hit.length) { exact = hit; how = "verb"; break outer; }
+        }
+      }
+    }
+    // ending cut off, compared with whole dictionary words (салаты → салат), then stem to stem
     if (!exact.length && !n.includes(" ")) for (let k = 1; k <= 3 && n.length - k >= 3; k++) { const hit = IDX.ru.get(n.slice(0, -k)); if (hit) { exact = hit; how = "form"; break; } }
     if (!exact.length && !n.includes(" ")) { exact = IDX.ruStem.get(ruStem(n)) || []; how = exact.length ? "form" : ""; }
     if (!exact.length) { exact = (IDX.ruStem.get("~" + (n.includes(" ") ? n : ruStem(n))) || []).slice(0, 1); how = exact.length ? "alt" : ""; }
@@ -147,6 +290,7 @@ function findOffline(q, src) {
   } else {
     const n = normX(q).replace(/^to /, "");
     exact = IDX.en.get(n) || [];
+    if (!exact.length && EN_IRREG[n]) { exact = IDX.en.get(EN_IRREG[n]) || []; how = exact.length ? "verb" : ""; }
     if (!exact.length && !n.includes(" ")) { exact = IDX.enStem.get(enStem(n)) || []; how = exact.length ? "form" : ""; }
     if (!exact.length && n.length > 1) for (const e of DICT) { if (senses(e.en).some(t => t.startsWith(n))) partial.push(e); if (partial.length >= 8) break; }
   }
@@ -154,7 +298,7 @@ function findOffline(q, src) {
   exact = exact.slice().sort((a, b) => (a.auto ? 1 : 0) - (b.auto ? 1 : 0));
   return { exact, partial, how };
 }
-const HOW_TEXT = { prefix: "צורת הבסיס", form: "צורת הבסיס", spelling: "כתיב אחר", alt: "פירוש קרוב" };
+const HOW_TEXT = { prefix: "צורת הבסיס", form: "צורת הבסיס", spelling: "כתיב אחר", alt: "פירוש קרוב", verb: "שם הפועל" };
 function fromDict(e, src, how) {
   const r = fromDictRaw(e, src);
   r.how = how || "";
