@@ -614,9 +614,8 @@ async function lookup(raw) {
   const local = exact.length ? fromDict(exact[0], src, how) : null;
   const showLocal = () => { render(local); if (exact.length > 1) showSuggestions(exact.slice(1)); };
   if (local) { showLocal(); return; }
-  if (cache.has(q)) { render(cache.get(q)); return; } // looked up before: instant, works offline too
   if (exam) {
-    message(`«${esc(q)}» לא נמצאת במילון המובנה.<br>במצב מבחן אין תרגום מהאינטרנט. נסו צורה אחרת של המילה.`);
+    message(`«${esc(q)}» לא נמצאת במילון.<br>נסו צורה אחרת של המילה, או את צורת הבסיס שלה.`);
     showSuggestions(partial); return;
   }
   if (!navigator.onLine) {
@@ -664,7 +663,6 @@ function onInput() {
     const q = v.trim(); if (!q || !l) return;
     const { exact, how } = findOffline(q, l);
     if (exact.length) { render(fromDict(exact[0], l, how)); showSuggestions(exact.slice(1)); }
-    else if (cache.has(q)) render(cache.get(q));
   }, 120);
 }
 $("#form").addEventListener("submit", e => { e.preventDefault(); $("#q").blur(); lookup($("#q").value); });
@@ -680,61 +678,15 @@ function renderRecent() {
 }
 $("#recent").addEventListener("click", e => { const b = e.target.closest("[data-r]"); if (b) { $("#q").value = b.dataset.r; onInput(); lookup(b.dataset.r); } });
 
-// ---------- online status ----------
+// ---------- offline only (exam mode is always on) ----------
+// The app never goes to the internet: translations come only from the built-in dictionary,
+// and pronunciation uses only the phone's own voices.
+const exam = true;
 function netStatus() {
-  const on = navigator.onLine && !exam, n = $("#net");
-  n.classList.toggle("off", !on);
-  n.querySelector("span").textContent = exam ? "מצב מבחן: מילון מובנה בלבד" : on ? "מחובר" : "ללא אינטרנט: מילון מובנה";
+  const n = $("#net");
+  n.classList.remove("off");
+  n.querySelector("span").textContent = `עובד בלי אינטרנט · ${DICT.length.toLocaleString("he-IL")} מילים`;
 }
-
-// ---------- exam mode ----------
-let exam = store.get("milonit.exam", false);
-function setExam(on) {
-  exam = on; store.set("milonit.exam", on);
-  $("#examBtn").setAttribute("aria-pressed", on);
-  $("#examBtn").textContent = on ? "יציאה ממצב מבחן" : "מצב מבחן";
-  $("#examBar").hidden = !on;
-  if (on && ctl) ctl.abort();
-  netStatus();
-}
-$("#examBtn").addEventListener("click", () => { setExam(!exam); if (exam) runChecks(); });
-
-// ---------- readiness check ----------
-const APP_FILES = ["index.html", "app.js", "dict.js", "dict-extra.js", "dict-auto.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
-async function offlineReady() {
-  if (!("caches" in window) || !("serviceWorker" in navigator)) return { ok: false, why: "הדפדפן הזה לא תומך בשמירה לאופליין." };
-  try {
-    const keys = (await caches.keys()).filter(k => k.startsWith("milonit-")).sort();
-    if (!keys.length) return { ok: false, why: "האפליקציה עוד לא נשמרה. פתחו אותה פעם אחת כשיש אינטרנט וחכו כמה שניות." };
-    const c = await caches.open(keys[keys.length - 1]);
-    const missing = [];
-    for (const f of APP_FILES) if (!(await c.match(new URL(f, location.href).href, { ignoreSearch: true }))) missing.push(f);
-    return missing.length ? { ok: false, why: "חסרים קבצים: " + missing.join(", ") + ". פתחו את האפליקציה עם אינטרנט ונסו שוב." } : { ok: true };
-  } catch { return { ok: false, why: "לא הצלחתי לבדוק את הזיכרון של האפליקציה." }; }
-}
-function voiceFor(lang) { return voices.find(v => LANG[lang].speech.some(c => v.lang.toLowerCase().replace("_", "-").startsWith(c))); }
-async function runChecks() {
-  $("#ready").hidden = false;
-  const items = [];
-  const row = (state, title, note) => `<li class="${state}"><span class="mark">${state === "ok" ? "✓" : state === "bad" ? "✗" : "…"}</span><span>${esc(title)}${note ? `<small>${esc(note)}</small>` : ""}</span></li>`;
-  $("#checks").innerHTML = row("wait", "בודק…");
-  const off = await offlineReady();
-  items.push(row(off.ok ? "ok" : "bad", off.ok ? "האפליקציה שמורה בטלפון ותעבוד בלי אינטרנט" : "האפליקציה עוד לא מוכנה לאופליין", off.why));
-  items.push(row(DICT.length > 1000 ? "ok" : "bad", `המילון המובנה: ${DICT.length.toLocaleString("he-IL")} מילים`));
-  items.push(row(standalone ? "ok" : "bad", standalone ? "האפליקציה מותקנת במסך הבית" : "האפליקציה פתוחה בדפדפן ולא מותקנת",
-    standalone ? "" : "מומלץ להתקין אותה (הוספה למסך הבית), כדי שתיפתח גם בלי אינטרנט."));
-  loadVoices();
-  const vHint = "אפשר להוסיף קול בהגדרות הטלפון: אנדרואיד ← נגישות ← המרת טקסט לדיבור. אייפון ← נגישות ← תוכן מוקרא ← קולות.";
-  for (const l of ["he", "ru", "en"]) {
-    const v = voiceFor(l);
-    items.push(row(v ? "ok" : "bad", v ? `הגייה ב${LANG[l].name} עובדת בלי אינטרנט` : `אין בטלפון קול ל${LANG[l].name}`, v ? "" : "בלי אינטרנט כפתור ההשמעה לא יעבוד בשפה הזו. " + vHint));
-  }
-  $("#checks").innerHTML = items.join("");
-}
-$("#checkBtn").addEventListener("click", runChecks);
-$("#readyClose").addEventListener("click", () => { $("#ready").hidden = true; });
-window.addEventListener("online", netStatus);
-window.addEventListener("offline", netStatus);
 
 // ---------- install (PWA) ----------
 const standalone = matchMedia("(display-mode: standalone)").matches || navigator.standalone;
@@ -760,4 +712,4 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 // ---------- start ----------
 render(fromDict(DICT[0], "he"), { example: true });
 renderRecent();
-setExam(exam);
+netStatus();

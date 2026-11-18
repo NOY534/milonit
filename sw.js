@@ -1,6 +1,6 @@
 // שומר את קבצי האפליקציה בטלפון כדי שתעבוד גם בלי אינטרנט.
 // כשמעדכנים קבצים באתר, מעלים את מספר הגרסה כאן.
-const VERSION = "milonit-v10";
+const VERSION = "milonit-v11";
 const FILES = [
   "./", "index.html", "app.js", "dict.js", "dict-extra.js", "dict-auto.js", "manifest.webmanifest",
   "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"
