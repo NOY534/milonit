@@ -40,28 +40,112 @@ const DICT = window.DICT_RAW.trim().split("\n").map(line => {
 })();
 const senses = s => normX(s).split(/\s*[;,]\s*/).map(t => t.replace(/^to /, "")).filter(Boolean);
 
+// ---------- word-form aware search ----------
+// Hebrew: final letters unified, so "ספרים" → "ספר" compares cleanly
+const FINALS = { "ך": "כ", "ם": "מ", "ן": "נ", "ף": "פ", "ץ": "צ" };
+const heKey = s => normHe(s).replace(/[ךםןףץ]/g, c => FINALS[c]);
+// spelling without the vowel letters ו / י (except the first letter): אישה = אשה, כיסא = כסא
+const heSkel = s => { const k = heKey(s); return k.charAt(0) + k.slice(1).replace(/[וי]/g, ""); };
+// irregular plurals (keys are written with final letters unified)
+const HE_IRREG = Object.fromEntries(Object.entries({
+  "בתים": "בית", "ערים": "עיר", "אנשים": "איש", "נשים": "אישה", "ימים": "יום", "לילות": "לילה", "שנים": "שנה",
+  "אחים": "אח", "אחיות": "אחות", "בנים": "בן", "בנות": "בת", "אבות": "אבא", "אמהות": "אמא", "עיניים": "עין", "ידיים": "יד",
+  "רגליים": "רגל", "שיניים": "שן", "אוזניים": "אוזן", "דברים": "דבר", "שמות": "שם", "מקומות": "מקום", "חלונות": "חלון",
+  "דלתות": "דלת", "ארצות": "ארץ", "שעות": "שעה", "חודשים": "חודש", "ראשים": "ראש", "כלים": "כלי", "עצים": "עץ",
+  "פנים": "פנים", "חברות": "חברה", "מורות": "מורה", "רחובות": "רחוב", "כוכבים": "כוכב", "לבבות": "לב", "ספרות": "ספר",
+  "ילדות": "ילדה", "משפחות": "משפחה", "דודים": "דוד", "סבים": "סבא", "סבתות": "סבתא", "נעליים": "נעליים", "מכנסיים": "מכנסיים"
+}).map(([k, v]) => [heKey(k), v]));
+function heForms(q) {
+  const base = heKey(q);
+  const out = [];
+  const add = (s, how) => { if (s.length >= 2 && !out.some(o => o.s === s)) out.push({ s, how }); };
+  // prefixes ו ה ב כ ל מ ש, up to three of them (וכשה...)
+  const stems = [{ s: base, p: "" }];
+  for (let i = 0; i < 3; i++) {
+    const last = stems[stems.length - 1].s;
+    if (last.length > 2 && "והבכלמש".includes(last[0])) stems.push({ s: last.slice(1), p: stems[stems.length - 1].p + last[0] });
+    else break;
+  }
+  for (const { s, p } of stems) {
+    const tag = p ? "prefix" : "";
+    if (HE_IRREG[s]) add(heKey(HE_IRREG[s]), "form");
+    add(s, tag);
+    if (s.endsWith("יימ") && s.length > 4) add(s.slice(0, -3), "form"); // dual: עיניים → עין
+    // plural and feminine endings
+    if (s.endsWith("ימ") && s.length > 3) add(s.slice(0, -2), "form"); // final ם is stored as מ
+    if (s.endsWith("ות") && s.length > 3) { add(s.slice(0, -2) + "ה", "form"); add(s.slice(0, -2), "form"); add(s.slice(0, -2) + "ת", "form"); }
+    if (s.endsWith("ת") && s.length > 2) add(s.slice(0, -1) + "ה", "form");
+    if (s.endsWith("יות") && s.length > 4) add(s.slice(0, -3) + "ית", "form");
+    if (s.endsWith("ה") && s.length > 2) add(s.slice(0, -1), "form");
+  }
+  return out;
+}
+// Russian / English: compare word stems (книги, книгу, книгой → книг)
+const RU_END = ["ыми","ими","ами","ями","ого","его","ому","ему","ешь","ете","ишь","ите","ться","тся","ая","яя","ое","ее","ые","ие","ых","их","ым","им","ой","ей","ую","юю","ом","ем","ах","ях","ам","ям","ов","ев","ет","ит","ут","ют","ат","ят","ть","ла","ло","ли","а","я","ы","и","у","ю","е","о","ь","й","л"];
+function ruStem(w) {
+  w = normX(w);
+  if (w.length <= 3) return w;
+  for (const e of RU_END) if (w.endsWith(e) && w.length - e.length >= 3) return w.slice(0, -e.length);
+  return w;
+}
+function enStem(w) {
+  w = normX(w).replace(/^to /, "");
+  if (w.length <= 3) return w;
+  if (w.endsWith("ies") && w.length > 4) return w.slice(0, -3) + "y";
+  for (const e of ["ing", "ed", "es", "s"]) if (w.endsWith(e) && w.length - e.length >= 3) { let b = w.slice(0, -e.length); if (/(.)\1$/.test(b) && e !== "s") b = b.slice(0, -1); return b.replace(/e$/, ""); }
+  return w.replace(/e$/, "");
+}
+const IDX = { he: new Map(), heAlt: new Map(), skel: new Map(), ru: new Map(), ruStem: new Map(), en: new Map(), enStem: new Map() };
+const put = (m, k, e) => { if (!k) return; const a = m.get(k); if (!a) m.set(k, [e]); else if (!a.includes(e)) a.push(e); };
+function buildIndex() {
+  for (const e of DICT) {
+    put(IDX.he, heKey(e.he), e);
+    put(IDX.skel, heSkel(e.he), e);
+    if (e.heAlts) for (const a of e.heAlts.split(/\s*,\s*/)) put(IDX.heAlt, heKey(a), e);
+    for (const s of senses(e.ru)) { put(IDX.ru, s, e); if (!s.includes(" ")) put(IDX.ruStem, ruStem(s), e); }
+    if (e.trRu) put(IDX.ru, normX(e.trRu), e);
+    if (e.ruAlts) for (const s of senses(e.ruAlts)) { put(IDX.ruStem, "~" + (s.includes(" ") ? s : ruStem(s)), e); }
+    for (const s of senses(e.en)) { put(IDX.en, s, e); if (!s.includes(" ")) put(IDX.enStem, enStem(s), e); }
+  }
+}
+
+buildIndex();
+
 function findOffline(q, src) {
-  const exact = [], viaAlt = [], partial = [];
+  let exact = [], how = "", partial = [];
   if (src === "he") {
-    const n = normHe(q);
-    for (const e of DICT) {
-      const h = normHe(e.he);
-      if (h === n) exact.push(e);
-      else if (e.heAlts && e.heAlts.split(/\s*,\s*/).map(normHe).includes(n)) viaAlt.push(e);
-      else if (n.length > 1 && (h.startsWith(n) || n.startsWith(h) && h.length > 2)) partial.push(e);
+    const forms = heForms(q);
+    for (const f of forms) { const hit = IDX.he.get(f.s); if (hit) { exact = hit; how = f.how; break; } }
+    // other spelling: only for the whole word (with or without prefixes), never for a cut-off ending
+    if (!exact.length) for (const f of forms) { if (f.how === "form") continue; const hit = IDX.skel.get(heSkel(f.s)); if (hit) { exact = hit; how = "spelling"; break; } }
+    if (!exact.length) for (const f of forms) { const hit = IDX.heAlt.get(f.s); if (hit) { exact = hit; how = "alt"; break; } }
+    if (!exact.length) {
+      const n = heKey(q);
+      if (n.length > 1) for (const e of DICT) { const h = heKey(e.he); if (h.startsWith(n)) partial.push(e); if (partial.length >= 8) break; }
     }
+  } else if (src === "ru") {
+    const n = normX(q);
+    exact = IDX.ru.get(n) || [];
+    if (!exact.length && !n.includes(" ")) { exact = IDX.ruStem.get(ruStem(n)) || []; how = exact.length ? "form" : ""; }
+    if (!exact.length) { exact = (IDX.ruStem.get("~" + (n.includes(" ") ? n : ruStem(n))) || []).slice(0, 1); how = exact.length ? "alt" : ""; }
+    if (!exact.length && n.length > 1) for (const e of DICT) { if (senses(e.ru).some(t => t.startsWith(n))) partial.push(e); if (partial.length >= 8) break; }
   } else {
     const n = normX(q).replace(/^to /, "");
-    for (const e of DICT) {
-      const list = senses(src === "en" ? e.en : e.ru);
-      if (list.includes(n) || (src === "ru" && e.trRu && normX(e.trRu) === n)) exact.push(e);
-      else if (src === "ru" && e.ruAlts && senses(e.ruAlts).includes(n)) viaAlt.push(e);
-      else if (n.length > 1 && list.some(t => t.startsWith(n))) partial.push(e);
-    }
+    exact = IDX.en.get(n) || [];
+    if (!exact.length && !n.includes(" ")) { exact = IDX.enStem.get(enStem(n)) || []; how = exact.length ? "form" : ""; }
+    if (!exact.length && n.length > 1) for (const e of DICT) { if (senses(e.en).some(t => t.startsWith(n))) partial.push(e); if (partial.length >= 8) break; }
   }
-  return { exact: exact.length ? exact : viaAlt.slice(0, 1), partial: partial.concat(exact.length ? viaAlt : viaAlt.slice(1)).slice(0, 8) };
+  // hand-written entries first
+  exact = exact.slice().sort((a, b) => (a.auto ? 1 : 0) - (b.auto ? 1 : 0));
+  return { exact, partial, how };
 }
-function fromDict(e, src) {
+const HOW_TEXT = { prefix: "צורת הבסיס", form: "צורת הבסיס", spelling: "כתיב אחר", alt: "פירוש קרוב" };
+function fromDict(e, src, how) {
+  const r = fromDictRaw(e, src);
+  r.how = how || "";
+  return r;
+}
+function fromDictRaw(e, src) {
   const tr = heTranslit(e.nikud) || {};
   const alt = s => s ? s.split(/\s*,\s*/).filter(Boolean).slice(0, 3) : [];
   return {
@@ -282,7 +366,7 @@ function say(text, lang, btn) {
       speechSynthesis.speak(u); return;
     } catch {}
   }
-  if (navigator.onLine) {
+  if (navigator.onLine && !exam) {
     try {
       audio && audio.pause();
       audio = new Audio("https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=" + LANG[lang].g + "&q=" + encodeURIComponent(stripNikud(text).slice(0, 190)));
@@ -328,7 +412,7 @@ function render(r, opts = {}) {
     return `<div class="exline"><p dir="${l === "he" ? "rtl" : "ltr"}" class="${l === "he" ? "" : "ltr"}">${esc(ex[l])}${sub}</p>
       <button class="say ${l}" data-ex="${l}" type="button" aria-label="השמעת המשפט ב${LANG[l].name}">${SPEAK}</button></div>`;
   };
-  const badge = opts.example ? "דוגמה · הקלידו מילה כדי להתחיל" : r.origin === "offline" ? "מהמילון המובנה" : "תרגום מהאינטרנט";
+  const badge = opts.example ? "דוגמה · הקלידו מילה כדי להתחיל" : r.origin === "offline" ? "מהמילון המובנה" + (r.how ? " · נמצא לפי " + HOW_TEXT[r.how] : "") : "תרגום מהאינטרנט";
   $("#out").innerHTML = `<div class="card">
     <div class="card-head"><strong>${opts.example ? "דוגמה" : "תרגום"}${r.pos && !opts.example ? ` <span style="font-weight:400;color:var(--muted)">· ${esc(r.pos)}</span>` : ""}</strong><span class="badge">${esc(badge)}</span></div>
     ${order.map(row).join("")}
@@ -367,11 +451,15 @@ async function lookup(raw) {
   addRecent(q);
   showSuggestions([]);
   // Default: the built-in dictionary. The internet is used only for words that are not in it.
-  const { exact, partial } = findOffline(q, src);
-  const local = exact.length ? fromDict(exact[0], src) : null;
+  const { exact, partial, how } = findOffline(q, src);
+  const local = exact.length ? fromDict(exact[0], src, how) : null;
   const showLocal = () => { render(local); if (exact.length > 1) showSuggestions(exact.slice(1)); };
   if (local) { showLocal(); return; }
   if (cache.has(q)) { render(cache.get(q)); return; } // looked up before: instant, works offline too
+  if (exam) {
+    message(`«${esc(q)}» לא נמצאת במילון המובנה.<br>במצב מבחן אין תרגום מהאינטרנט. נסו צורה אחרת של המילה.`);
+    showSuggestions(partial); return;
+  }
   if (!navigator.onLine) {
     message(`«${esc(q)}» לא נמצאת במילון המובנה, ואין כרגע חיבור לאינטרנט.<br>התחברו לאינטרנט כדי לתרגם כל מילה.`);
     showSuggestions(partial); return;
@@ -415,8 +503,8 @@ function onInput() {
   clearTimeout(typeTimer);
   typeTimer = setTimeout(() => {
     const q = v.trim(); if (!q || !l) return;
-    const { exact } = findOffline(q, l);
-    if (exact.length) { render(fromDict(exact[0], l)); showSuggestions(exact.slice(1)); }
+    const { exact, how } = findOffline(q, l);
+    if (exact.length) { render(fromDict(exact[0], l, how)); showSuggestions(exact.slice(1)); }
     else if (cache.has(q)) render(cache.get(q));
   }, 120);
 }
@@ -435,10 +523,57 @@ $("#recent").addEventListener("click", e => { const b = e.target.closest("[data-
 
 // ---------- online status ----------
 function netStatus() {
-  const on = navigator.onLine, n = $("#net");
+  const on = navigator.onLine && !exam, n = $("#net");
   n.classList.toggle("off", !on);
-  n.querySelector("span").textContent = on ? "מחובר" : "ללא אינטרנט: מילון מובנה";
+  n.querySelector("span").textContent = exam ? "מצב מבחן: מילון מובנה בלבד" : on ? "מחובר" : "ללא אינטרנט: מילון מובנה";
 }
+
+// ---------- exam mode ----------
+let exam = store.get("milonit.exam", false);
+function setExam(on) {
+  exam = on; store.set("milonit.exam", on);
+  $("#examBtn").setAttribute("aria-pressed", on);
+  $("#examBtn").textContent = on ? "יציאה ממצב מבחן" : "מצב מבחן";
+  $("#examBar").hidden = !on;
+  if (on && ctl) ctl.abort();
+  netStatus();
+}
+$("#examBtn").addEventListener("click", () => { setExam(!exam); if (exam) runChecks(); });
+
+// ---------- readiness check ----------
+const APP_FILES = ["index.html", "app.js", "dict.js", "dict-extra.js", "dict-auto.js", "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png", "apple-touch-icon.png"];
+async function offlineReady() {
+  if (!("caches" in window) || !("serviceWorker" in navigator)) return { ok: false, why: "הדפדפן הזה לא תומך בשמירה לאופליין." };
+  try {
+    const keys = (await caches.keys()).filter(k => k.startsWith("milonit-")).sort();
+    if (!keys.length) return { ok: false, why: "האפליקציה עוד לא נשמרה. פתחו אותה פעם אחת כשיש אינטרנט וחכו כמה שניות." };
+    const c = await caches.open(keys[keys.length - 1]);
+    const missing = [];
+    for (const f of APP_FILES) if (!(await c.match(new URL(f, location.href).href, { ignoreSearch: true }))) missing.push(f);
+    return missing.length ? { ok: false, why: "חסרים קבצים: " + missing.join(", ") + ". פתחו את האפליקציה עם אינטרנט ונסו שוב." } : { ok: true };
+  } catch { return { ok: false, why: "לא הצלחתי לבדוק את הזיכרון של האפליקציה." }; }
+}
+function voiceFor(lang) { return voices.find(v => LANG[lang].speech.some(c => v.lang.toLowerCase().replace("_", "-").startsWith(c))); }
+async function runChecks() {
+  $("#ready").hidden = false;
+  const items = [];
+  const row = (state, title, note) => `<li class="${state}"><span class="mark">${state === "ok" ? "✓" : state === "bad" ? "✗" : "…"}</span><span>${esc(title)}${note ? `<small>${esc(note)}</small>` : ""}</span></li>`;
+  $("#checks").innerHTML = row("wait", "בודק…");
+  const off = await offlineReady();
+  items.push(row(off.ok ? "ok" : "bad", off.ok ? "האפליקציה שמורה בטלפון ותעבוד בלי אינטרנט" : "האפליקציה עוד לא מוכנה לאופליין", off.why));
+  items.push(row(DICT.length > 1000 ? "ok" : "bad", `המילון המובנה: ${DICT.length.toLocaleString("he-IL")} מילים`));
+  items.push(row(standalone ? "ok" : "bad", standalone ? "האפליקציה מותקנת במסך הבית" : "האפליקציה פתוחה בדפדפן ולא מותקנת",
+    standalone ? "" : "מומלץ להתקין אותה (הוספה למסך הבית), כדי שתיפתח גם בלי אינטרנט."));
+  loadVoices();
+  const vHint = "אפשר להוסיף קול בהגדרות הטלפון: אנדרואיד ← נגישות ← המרת טקסט לדיבור. אייפון ← נגישות ← תוכן מוקרא ← קולות.";
+  for (const l of ["he", "ru", "en"]) {
+    const v = voiceFor(l);
+    items.push(row(v ? "ok" : "bad", v ? `הגייה ב${LANG[l].name} עובדת בלי אינטרנט` : `אין בטלפון קול ל${LANG[l].name}`, v ? "" : "בלי אינטרנט כפתור ההשמעה לא יעבוד בשפה הזו. " + vHint));
+  }
+  $("#checks").innerHTML = items.join("");
+}
+$("#checkBtn").addEventListener("click", runChecks);
+$("#readyClose").addEventListener("click", () => { $("#ready").hidden = true; });
 window.addEventListener("online", netStatus);
 window.addEventListener("offline", netStatus);
 
@@ -466,4 +601,4 @@ if ("serviceWorker" in navigator && location.protocol !== "file:") {
 // ---------- start ----------
 render(fromDict(DICT[0], "he"), { example: true });
 renderRecent();
-netStatus();
+setExam(exam);

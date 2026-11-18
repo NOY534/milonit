@@ -97,6 +97,20 @@ form { display: flex; gap: 8px; }
 .install .x { background: none; color: var(--muted); padding: 4px 8px; }
 footer { text-align: center; font-size: 12px; color: var(--muted); }
 
+.tools { display: flex; gap: 8px; flex-wrap: wrap; }
+.tbtn { border: 1.5px solid var(--line); background: var(--card); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.tbtn[aria-pressed="true"] { background: var(--ru); border-color: var(--ru); color: #fff; }
+.exam-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; background: var(--ru-soft); color: var(--ru); border: 1.5px solid var(--ru); border-radius: 14px; padding: 10px 14px; font-size: 15px; }
+.exam-bar span { color: var(--ink); }
+.checks { list-style: none; margin: 0; padding: 6px 18px 14px; display: flex; flex-direction: column; gap: 10px; }
+.checks li { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 8px; align-items: start; font-size: 15px; }
+.checks .mark { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; font-weight: 700; color: #fff; margin-top: 1px; }
+.checks .ok .mark { background: var(--en); }
+.checks .bad .mark { background: var(--ru); }
+.checks .wait .mark { background: var(--muted); }
+.checks small { display: block; color: var(--muted); font-size: 13px; }
+.card-head .x { background: none; border: 0; color: var(--muted); cursor: pointer; font-size: 16px; padding: 2px 6px; }
+
 @media (max-width: 480px) {
   .row { grid-template-columns: minmax(0,1fr) auto; gap: 6px 12px; }
   .row .tag { grid-column: 1 / -1; justify-self: start; padding: 2px 10px; }
@@ -110,8 +124,21 @@ footer { text-align: center; font-size: 12px; color: var(--muted); }
 <div class="app">
   <header>
     <h1>מילונית</h1>
-    <div class="langs"><span class="l-he">עברית</span><span class="l-en">English</span><span class="l-ru">Русский</span></div>
+    <div class="tools">
+      <button type="button" class="tbtn" id="checkBtn">בדיקת מוכנות</button>
+      <button type="button" class="tbtn" id="examBtn" aria-pressed="false">מצב מבחן</button>
+    </div>
   </header>
+
+  <div class="exam-bar" id="examBar" hidden>
+    <strong>מצב מבחן פעיל</strong>
+    <span>התרגום עובד רק מהמילון המובנה, בלי אינטרנט.</span>
+  </div>
+
+  <div class="card" id="ready" hidden>
+    <div class="card-head"><strong>בדיקת מוכנות למבחן</strong><button type="button" class="x" id="readyClose" aria-label="סגירה">✕</button></div>
+    <ul class="checks" id="checks"></ul>
+  </div>
 
   <div class="install" id="install" hidden>
     <span id="installText">אפשר להתקין את מילונית בטלפון ולפתוח אותה כמו אפליקציה.</span>
